@@ -136,6 +136,29 @@ local function keyName(k)
 	return s
 end
 
+local function toKey(v)
+	if typeof(v) == "EnumItem" then return v end
+	if type(v) == "string" then
+		local n = (v:gsub("^Enum%.KeyCode%.", ""))
+		n = (n:gsub("^Enum%.UserInputType%.", ""))
+		local ok, r = pcall(function() return Enum.KeyCode[n] end)
+		if ok and r then return r end
+		ok, r = pcall(function() return Enum.UserInputType[n] end)
+		if ok and r then return r end
+	end
+	return nil
+end
+
+-- keys that can't type into a TextBox, so a focused TextBox must not block them
+local function isNonTypingKey(k)
+	if typeof(k) ~= "EnumItem" then return true end
+	if k.EnumType ~= Enum.KeyCode then return true end
+	local n = k.Name
+	return n:match("^F%d+$") ~= nil or n:find("Shift") ~= nil or n:find("Control") ~= nil or n:find("Alt") ~= nil
+		or n == "Insert" or n == "Delete" or n == "Home" or n == "End" or n == "PageUp" or n == "PageDown"
+		or n == "CapsLock" or n == "Tab" or n == "Escape"
+end
+
 -- accent color registry (so Library:SetAccent recolors everything live)
 local accentFns = {}
 local function onAccent(fn)
@@ -329,14 +352,16 @@ function Library:CreateMain(cfg)
 
 	local Window = {Gui = gui, Main = main, Pages = {}, Selected = nil}
 	local order = 0
-	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
+	local toggleKey = toKey(cfg.ToggleKey) or Enum.KeyCode.RightShift
 
 	-- Toggle key: InputBegan (ignores `gp`, since Roblox shift-lock marks RightShift as processed)
 	-- plus a polling fallback via IsKeyDown, in case the game/executor swallows the event.
 	local lastToggle = 0
 	local rebinding = false -- true while the "Toggle UI" bind is waiting for a new key
 	local wasDown = false
+	local rebindAt = 0
 	local function setToggleKey(k)
+		k = toKey(k)
 		if not k then return end
 		toggleKey = k
 		-- don't let the press that picked the key (or a held key) toggle the UI
@@ -344,9 +369,9 @@ function Library:CreateMain(cfg)
 		lastToggle = os.clock()
 	end
 	local function pressToggle()
-		if rebinding then return end
+		if rebinding and os.clock() - rebindAt < 8 then return end -- failsafe: never stay locked
 		if os.clock() - lastToggle < 0.15 then return end -- both paths can fire for one press
-		if UIS:GetFocusedTextBox() then return end
+		if UIS:GetFocusedTextBox() and not isNonTypingKey(toggleKey) then return end
 		lastToggle = os.clock()
 		gui.Enabled = not gui.Enabled
 	end
@@ -796,7 +821,7 @@ function Library:CreateMain(cfg)
 			----------------------------------------------------------------
 			function Section:CreateBind(opts, callback)
 				callback = callback or opts.Callback or noop
-				local key = opts.Default
+				local key = toKey(opts.Default)
 				local listening = false
 				-- `ToggleUI = true` makes this bind control the window's toggle key
 				if opts.ToggleUI and key then setToggleKey(key) end
@@ -813,6 +838,7 @@ function Library:CreateMain(cfg)
 					if listening then return end
 					listening = true
 					rebinding = true
+					rebindAt = os.clock()
 					btn.Text = "..."
 					task.wait(0.1)
 					local conn
@@ -841,7 +867,12 @@ function Library:CreateMain(cfg)
 				end)
 
 				return register(flagPrefix, opts, {
-					Set = function(_, k) key = k btn.Text = keyName(key) if opts.ToggleUI and k then setToggleKey(k) end end,
+					Set = function(_, k)
+						local nk = toKey(k)
+						if k == nil or nk then key = nk end
+						btn.Text = keyName(key)
+						if opts.ToggleUI and nk then setToggleKey(nk) end
+					end,
 					Get = function() return key end,
 				}, "Bind")
 			end
