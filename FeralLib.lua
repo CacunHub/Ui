@@ -93,6 +93,8 @@ end
 
 local function new(class, props, kids)
 	local i = Instance.new(class)
+	-- keep all UI text in English: stop Roblox from auto-translating it to the player's language
+	if i:IsA("GuiBase2d") then i.AutoLocalize = false end
 	for k, v in pairs(props or {}) do i[k] = v end
 	for _, c in ipairs(kids or {}) do c.Parent = i end
 	return i
