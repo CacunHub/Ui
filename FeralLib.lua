@@ -15,7 +15,7 @@
 	  Section:CreateBox     ({ Title, Default, Placeholder }, callback(text))          -> { Set, Get }
 	  Section:CreateSlider  ({ Title, Min, Max, Default, Decimals }, callback(number)) -> { Set, Get }
 	  Section:CreateDropdown({ Title, Options, Default }, callback(choice))            -> { Set, Get, Refresh }
-	  Section:CreateBind    ({ Title, Default = Enum.KeyCode.X }, callback())          -> { Set, Get }
+	  Section:CreateBind    ({ Title, Default = Enum.KeyCode.X, ToggleUI = true }, callback()) -> { Set, Get }  (ToggleUI = this bind sets the window toggle key)
 
 	  Every control also takes an optional `Flag = "Id"` and is stored in Library.Flags[Id] (used by SaveManager).
 	  Dropdown also takes `Multi = true` (Set/Get use arrays). Set(v, true) on Box/Dropdown also fires the callback.
@@ -334,7 +334,17 @@ function Library:CreateMain(cfg)
 	-- Toggle key: InputBegan (ignores `gp`, since Roblox shift-lock marks RightShift as processed)
 	-- plus a polling fallback via IsKeyDown, in case the game/executor swallows the event.
 	local lastToggle = 0
+	local rebinding = false -- true while the "Toggle UI" bind is waiting for a new key
+	local wasDown = false
+	local function setToggleKey(k)
+		if not k then return end
+		toggleKey = k
+		-- don't let the press that picked the key (or a held key) toggle the UI
+		wasDown = typeof(k) == "EnumItem" and k.EnumType == Enum.KeyCode and UIS:IsKeyDown(k)
+		lastToggle = os.clock()
+	end
 	local function pressToggle()
+		if rebinding then return end
 		if os.clock() - lastToggle < 0.15 then return end -- both paths can fire for one press
 		if UIS:GetFocusedTextBox() then return end
 		lastToggle = os.clock()
@@ -343,7 +353,6 @@ function Library:CreateMain(cfg)
 	local keyConn = UIS.InputBegan:Connect(function(i)
 		if i.KeyCode == toggleKey or i.UserInputType == toggleKey then pressToggle() end
 	end)
-	local wasDown = false
 	local pollConn = RunService.RenderStepped:Connect(function()
 		local down = typeof(toggleKey) == "EnumItem" and toggleKey.EnumType == Enum.KeyCode and UIS:IsKeyDown(toggleKey)
 		if down and not wasDown then pressToggle() end
@@ -361,7 +370,7 @@ function Library:CreateMain(cfg)
 		if state == nil then state = not gui.Enabled end
 		gui.Enabled = state
 	end
-	function Window:SetToggleKey(k) toggleKey = k end
+	function Window:SetToggleKey(k) setToggleKey(k) end
 	function Window:Destroy()
 		keyConn:Disconnect()
 		pollConn:Disconnect()
@@ -789,6 +798,8 @@ function Library:CreateMain(cfg)
 				callback = callback or opts.Callback or noop
 				local key = opts.Default
 				local listening = false
+				-- `ToggleUI = true` makes this bind control the window's toggle key
+				if opts.ToggleUI and key then setToggleKey(key) end
 
 				local _, bg = makeRow(35, "Bind")
 				new("TextLabel", {Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -100, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBlack,
@@ -801,6 +812,7 @@ function Library:CreateMain(cfg)
 				btn.MouseButton1Click:Connect(function()
 					if listening then return end
 					listening = true
+					rebinding = true
 					btn.Text = "..."
 					task.wait(0.1)
 					local conn
@@ -816,19 +828,20 @@ function Library:CreateMain(cfg)
 						end
 						if picked == nil then return end
 						conn:Disconnect()
-						task.defer(function() listening = false end)
+						task.defer(function() listening = false rebinding = false end)
 						if picked == "clear" then key = nil elseif picked ~= false then key = picked end
 						btn.Text = keyName(key)
+						if opts.ToggleUI and key then setToggleKey(key) end
 					end)
 				end)
 
 				UIS.InputBegan:Connect(function(i, gp)
-					if listening or gp or not key then return end
+					if listening or gp or not key or opts.ToggleUI then return end
 					if i.KeyCode == key or i.UserInputType == key then task.spawn(callback, key) end
 				end)
 
 				return register(flagPrefix, opts, {
-					Set = function(_, k) key = k btn.Text = keyName(key) end,
+					Set = function(_, k) key = k btn.Text = keyName(key) if opts.ToggleUI and k then setToggleKey(k) end end,
 					Get = function() return key end,
 				}, "Bind")
 			end
