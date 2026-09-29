@@ -28,6 +28,7 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 local Library = {
@@ -59,6 +60,43 @@ local Library = {
 
 local T = Library.Theme
 local A = Library.Assets
+
+-- Custom cursor is active only while a Feral Window is open.
+local CURSOR_ID = "rbxassetid://112328791874559"
+
+local function createCursor()
+	local parent = getParent()
+	local old = parent:FindFirstChild("FeralCustomCursor")
+	if old then old:Destroy() end
+
+	local cursorGui = new("ScreenGui", {
+		Name = "FeralCustomCursor",
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		DisplayOrder = 2147483646,
+		ZIndexBehavior = Enum.ZIndexBehavior.Global,
+		Parent = parent,
+	})
+
+	local cursor = new("ImageLabel", {
+		Name = "Cursor",
+		BackgroundTransparency = 1,
+		Image = CURSOR_ID,
+		Size = UDim2.fromOffset(32, 32),
+		AnchorPoint = Vector2.new(0, 0),
+		ZIndex = 2147483647,
+		Visible = true,
+		Parent = cursorGui,
+	})
+
+	local connection = RunService.RenderStepped:Connect(function()
+		if not cursorGui.Parent then return end
+		local position = UIS:GetMouseLocation()
+		cursor.Position = UDim2.fromOffset(position.X, position.Y)
+	end)
+
+	return cursorGui, connection
+end
 
 -- Registers a control in Library.Flags so SaveManager can save/load it.
 -- Give a control an explicit `Flag = "MyId"` in its options, or leave it out and an id is
@@ -273,23 +311,84 @@ function Library:CreateMain(cfg)
 		EasingStyle = Enum.EasingStyle.Quart, TweenTime = T.T1, Padding = UDim.new(0, 10), ScrollWheelInputEnabled = false,
 		TouchInputEnabled = false, GamepadInputEnabled = false, Parent = pageArea})
 
-	local Window = {Gui = gui, Main = main, Pages = {}, Selected = nil}
+	local Window = {
+		Gui = gui,
+		Main = main,
+		Pages = {},
+		Selected = nil,
+		CursorGui = nil,
+		CursorConnection = nil,
+		Destroyed = false,
+	}
 	local order = 0
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
 
+	local function enableCursor()
+		if Window.Destroyed or not gui.Parent or not gui.Enabled then return end
+
+		if Window.CursorGui and Window.CursorGui.Parent then
+			Window.CursorGui.Enabled = true
+			UIS.MouseIconEnabled = false
+			return
+		end
+
+		Window.CursorGui, Window.CursorConnection = createCursor()
+		UIS.MouseIconEnabled = false
+	end
+
+	local function disableCursor()
+		-- Always give control back to Roblox first.
+		UIS.MouseIconEnabled = true
+
+		if Window.CursorConnection then
+			Window.CursorConnection:Disconnect()
+			Window.CursorConnection = nil
+		end
+
+		if Window.CursorGui then
+			Window.CursorGui:Destroy()
+			Window.CursorGui = nil
+		end
+	end
+
+	-- If the UI is unloaded/destroyed externally, restore Roblox's cursor.
+	gui.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			disableCursor()
+		end
+	end)
+
 	local keyConn = UIS.InputBegan:Connect(function(i, gp)
-		if not gp and i.KeyCode == toggleKey then gui.Enabled = not gui.Enabled end
+		if not gp and i.KeyCode == toggleKey then
+			Window:Toggle()
+		end
 	end)
 
 	function Window:Toggle(state)
+		if Window.Destroyed then return end
 		if state == nil then state = not gui.Enabled end
+
 		gui.Enabled = state
+
+		if state then
+			enableCursor()
+		else
+			disableCursor()
+		end
 	end
+
 	function Window:SetToggleKey(k) toggleKey = k end
+
 	function Window:Destroy()
+		if Window.Destroyed then return end
+		Window.Destroyed = true
 		keyConn:Disconnect()
+		disableCursor()
 		gui:Destroy()
 	end
+
+	-- The library opens the window by default, so enable the custom cursor now.
+	enableCursor()
 
 	----------------------------------------------------------------
 	-- Page
