@@ -28,7 +28,6 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 local Library = {
@@ -64,124 +63,17 @@ local A = Library.Assets
 -- Custom cursor is active only while a Feral Window is open.
 local CURSOR_ID = "rbxassetid://112328791874559"
 
-local function createCursor()
-	local parent = getParent()
-	local old = parent:FindFirstChild("FeralCustomCursor")
-	if old then old:Destroy() end
-
-	local cursorGui = new("ScreenGui", {
-		Name = "FeralCustomCursor",
-		IgnoreGuiInset = true,
-		ResetOnSpawn = false,
-		DisplayOrder = 2147483646,
-		ZIndexBehavior = Enum.ZIndexBehavior.Global,
-		Parent = parent,
-	})
-
-	local cursor = new("ImageLabel", {
-		Name = "Cursor",
-		BackgroundTransparency = 1,
-		Image = CURSOR_ID,
-		Size = UDim2.fromOffset(32, 32),
-		AnchorPoint = Vector2.new(0, 0),
-		ZIndex = 2147483647,
-		Visible = true,
-		Parent = cursorGui,
-	})
-
-	local connection = RunService.RenderStepped:Connect(function()
-		if not cursorGui.Parent then return end
-		local position = UIS:GetMouseLocation()
-		cursor.Position = UDim2.fromOffset(position.X, position.Y)
-	end)
-
-	return cursorGui, connection
+local function enableCursor()
+	UIS.MouseIconEnabled = true
+	UIS.MouseIcon = CURSOR_ID
 end
 
--- Registers a control in Library.Flags so SaveManager can save/load it.
--- Give a control an explicit `Flag = "MyId"` in its options, or leave it out and an id is
--- generated from "<page>/<section>/<title>".
-local function register(prefix, opts, obj, kind)
-	obj.Type = kind
-	local flag = opts.Flag
-	if not flag then
-		local base = prefix .. tostring(opts.Title)
-		flag = base
-		local n = 1
-		while Library.Flags[flag] do
-			n += 1
-			flag = base .. "#" .. n
-		end
-	end
-	obj.Flag = flag
-	Library.Flags[flag] = obj
-	return obj
+local function disableCursor()
+	-- Restore Roblox's normal cursor.
+	UIS.MouseIcon = ""
+	UIS.MouseIconEnabled = true
 end
 
---------------------------------------------------------------------
--- Helpers
---------------------------------------------------------------------
-local function getParent()
-	local ok, h = pcall(function() return gethui and gethui() end)
-	if ok and h then return h end
-	local ok2 = pcall(function() return game:GetService("CoreGui").Name end)
-	if ok2 then return game:GetService("CoreGui") end
-	return player:WaitForChild("PlayerGui")
-end
-
-local function new(class, props, kids)
-	local i = Instance.new(class)
-	-- keep all UI text in English: stop Roblox from auto-translating it to the player's language
-	if i:IsA("GuiBase2d") then i.AutoLocalize = false end
-	for k, v in pairs(props or {}) do i[k] = v end
-	for _, c in ipairs(kids or {}) do c.Parent = i end
-	return i
-end
-
-local function corner(r) return new("UICorner", {CornerRadius = UDim.new(0, r)}) end
-
-local function tween(o, props, t)
-	TweenService:Create(o, TweenInfo.new(t or T.T1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
-end
-
-local function rgbTag(c)
-	return string.format("rgb(%d,%d,%d)", math.floor(c.R * 255), math.floor(c.G * 255), math.floor(c.B * 255))
-end
-
-local function draggable(handle, target)
-	local dragging, start, startPos
-	handle.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging, start, startPos = true, i.Position, target.Position
-			i.Changed:Connect(function()
-				if i.UserInputState == Enum.UserInputState.End then dragging = false end
-			end)
-		end
-	end)
-	UIS.InputChanged:Connect(function(i)
-		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-			local d = i.Position - start
-			target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-		end
-	end)
-end
-
-local function keyName(k)
-	if not k then return "None" end
-	local s = tostring(k):gsub("Enum%.KeyCode%.", ""):gsub("Enum%.UserInputType%.", "")
-	s = s:gsub("MouseButton", "MB")
-	return s
-end
-
--- accent color registry (so Library:SetAccent recolors everything live)
-local accentFns = {}
-local function onAccent(fn)
-	table.insert(accentFns, fn)
-	fn(T.Accent)
-end
-local function accent(inst, prop)
-	onAccent(function(c) inst[prop] = c end)
-end
 
 function Library:SetAccent(color)
 	T.Accent = color
@@ -316,47 +208,10 @@ function Library:CreateMain(cfg)
 		Main = main,
 		Pages = {},
 		Selected = nil,
-		CursorGui = nil,
-		CursorConnection = nil,
 		Destroyed = false,
 	}
 	local order = 0
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
-
-	local function enableCursor()
-		if Window.Destroyed or not gui.Parent or not gui.Enabled then return end
-
-		if Window.CursorGui and Window.CursorGui.Parent then
-			Window.CursorGui.Enabled = true
-			UIS.MouseIconEnabled = false
-			return
-		end
-
-		Window.CursorGui, Window.CursorConnection = createCursor()
-		UIS.MouseIconEnabled = false
-	end
-
-	local function disableCursor()
-		-- Always give control back to Roblox first.
-		UIS.MouseIconEnabled = true
-
-		if Window.CursorConnection then
-			Window.CursorConnection:Disconnect()
-			Window.CursorConnection = nil
-		end
-
-		if Window.CursorGui then
-			Window.CursorGui:Destroy()
-			Window.CursorGui = nil
-		end
-	end
-
-	-- If the UI is unloaded/destroyed externally, restore Roblox's cursor.
-	gui.AncestryChanged:Connect(function(_, parent)
-		if not parent then
-			disableCursor()
-		end
-	end)
 
 	local keyConn = UIS.InputBegan:Connect(function(i, gp)
 		if not gp and i.KeyCode == toggleKey then
@@ -387,7 +242,7 @@ function Library:CreateMain(cfg)
 		gui:Destroy()
 	end
 
-	-- The library opens the window by default, so enable the custom cursor now.
+	-- The library opens the window by default.
 	enableCursor()
 
 	----------------------------------------------------------------
