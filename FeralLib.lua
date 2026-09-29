@@ -331,9 +331,23 @@ function Library:CreateMain(cfg)
 	local order = 0
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
 
-	local keyConn = UIS.InputBegan:Connect(function(i, gp)
-		-- don't use `gp`: Roblox's shift-lock binds RightShift/LeftShift and marks it as processed
-		if i.KeyCode == toggleKey and not UIS:GetFocusedTextBox() then gui.Enabled = not gui.Enabled end
+	-- Toggle key: InputBegan (ignores `gp`, since Roblox shift-lock marks RightShift as processed)
+	-- plus a polling fallback via IsKeyDown, in case the game/executor swallows the event.
+	local lastToggle = 0
+	local function pressToggle()
+		if os.clock() - lastToggle < 0.15 then return end -- both paths can fire for one press
+		if UIS:GetFocusedTextBox() then return end
+		lastToggle = os.clock()
+		gui.Enabled = not gui.Enabled
+	end
+	local keyConn = UIS.InputBegan:Connect(function(i)
+		if i.KeyCode == toggleKey or i.UserInputType == toggleKey then pressToggle() end
+	end)
+	local wasDown = false
+	local pollConn = RunService.RenderStepped:Connect(function()
+		local down = typeof(toggleKey) == "EnumItem" and toggleKey.EnumType == Enum.KeyCode and UIS:IsKeyDown(toggleKey)
+		if down and not wasDown then pressToggle() end
+		wasDown = down
 	end)
 
 	-- custom cursor follows the window: shown while open, normal Roblox cursor when closed/unloaded
@@ -350,6 +364,7 @@ function Library:CreateMain(cfg)
 	function Window:SetToggleKey(k) toggleKey = k end
 	function Window:Destroy()
 		keyConn:Disconnect()
+		pollConn:Disconnect()
 		gui:Destroy()
 		Cursor.Holders[cursorKey] = nil
 		if not cursorPrune() then cursorStop() end
