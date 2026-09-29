@@ -332,7 +332,8 @@ function Library:CreateMain(cfg)
 	local toggleKey = cfg.ToggleKey or Enum.KeyCode.RightShift
 
 	local keyConn = UIS.InputBegan:Connect(function(i, gp)
-		if not gp and i.KeyCode == toggleKey then gui.Enabled = not gui.Enabled end
+		-- don't use `gp`: Roblox's shift-lock binds RightShift/LeftShift and marks it as processed
+		if i.KeyCode == toggleKey and not UIS:GetFocusedTextBox() then gui.Enabled = not gui.Enabled end
 	end)
 
 	-- custom cursor follows the window: shown while open, normal Roblox cursor when closed/unloaded
