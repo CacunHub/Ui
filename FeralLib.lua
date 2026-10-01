@@ -47,7 +47,7 @@ local Library = {
 	},
 	Assets = {
 		Slice    = "rbxassetid://8068653048",
-		Logo     = "rbxassetid://115686881532575",
+		Logo     = "rbxassetid://134323059585110",
 		Gear     = "rbxassetid://7397332215",
 		Search   = "rbxassetid://8154282545",
 		Checkbox = "rbxassetid://4552505888",
